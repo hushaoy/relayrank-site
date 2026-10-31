@@ -1,296 +1,335 @@
-# RelayRank · 大模型中转站测评榜单（带后台 / 审核）
+# RelayRank · 大模型中转站测评榜单
 
-零依赖 Node 服务，前台榜单 + 后台管理 + 提交审核一条龙。数据落本地 `data/db.json`。
+给 AI API 中转站做体检：五维真实探测、模型质量评测、提交自动审核、可视化榜单。
 
-## 启动
-
-```cmd
-cd /d D:\新建文件夹\relayrank-site-hardened-20261028\relayrank-site
-run.cmd
-```
-
-或手动 `node server.js --port=8803`。`run.cmd` 会自动：
-
-- 数据目录自动探测：站点自带 `data\db.json` → 工作副本 `..\data\db.json` → 桌面整理包 `..\..\relayrank-data\data\db.json`，找到哪个用哪个
-- 设置 `ENABLE_DETECTIVE=1`、`DETECTIVE_PORT=5000`
-- 日志写 `logs\server.log`、`logs\boot.log`、`logs\detective.log`
-
-- 前台：http://127.0.0.1:8803/
-- 后台：http://127.0.0.1:8803/admin
-- 模型侦探：http://127.0.0.1:8803/detective/
-- 首次启动自动生成账号，见 `data/initial-admin.txt`（用户名 `admin`，密码随机 20 位；也可用 `ADMIN_PASSWORD` 预设，至少 12 位）
-- 模型侦探目录、Python 解释器写在 `detective.config.json`；换机器时改 `dir` / `python` 两项即可
-
-## 审核流程
+零运行时依赖的 Node.js 单文件服务，前台榜单 + 管理后台 + 审核流水线一条龙，数据落在本地 `db.json`。
 
 ```
-访客提交 /api/submit ─┐
-后台新增站点 ─────────┼─→ status=pending ─→ 后台审核 ─┬─ approve → published（进入公开榜）
-批量导入 ─────────────┘                              └─ reject  → rejected（公开榜不可见，留原因）
+Node >= 18  ·  零依赖  ·  SQLite 都不用  ·  一个 json 文件装下全站
 ```
 
-公开接口 `GET /api/sites` 只返回 `published`；待审、驳回、草稿一律不出现。
+---
 
-后台动作：
+## 目录
 
-| 操作 | 说明 |
+- [为什么做这个](#为什么做这个)
+- [核心特性](#核心特性)
+- [评分体系](#评分体系)
+- [实测引擎](#实测引擎)
+- [模型质量评测](#模型质量评测)
+- [自动实测与自动审核](#自动实测与自动审核)
+- [审核流程](#审核流程)
+- [快速开始](#快速开始)
+- [配置项](#配置项)
+- [HTTP 接口](#http-接口)
+- [安全设计](#安全设计)
+- [生产部署](#生产部署)
+- [目录结构](#目录结构)
+- [设计取舍](#设计取舍)
+- [路线图](#路线图)
+
+---
+
+## 为什么做这个
+
+大模型中转站越开越多，宣传页上写"稳定 99.9%"、"支持 Claude / GPT / Gemini"，实际用起来：
+
+- 首页能打开，`/v1/chat/completions` 却 502
+- 流式请求第一个 token 等 20 秒
+- 并发一上去就排队，或者直接限流
+- 模型列表写着 20 个，真正能调的只有 3 个
+- 说是 GPT-4，回包 `model` 字段却是 `some-other-model`
+
+人工挨个试太慢，凭感觉打分太主观。RelayRank 把这些做成可重复、可量化、可复核的自动检测：
+
+**同一套请求、同一套计时、同一套判分，对所有站点跑一遍，把结果摆在一张榜上。**
+
+---
+
+## 核心特性
+
+| 模块 | 能力 |
 |---|---|
-| 通过 | `pending/rejected → published`，记录审核日志 |
-| 驳回 | 必须填原因，写入审核日志，公开榜不可见 |
-| 回待审 | `published/rejected → pending`，重新排队 |
-| 批量通过 / 批量驳回 | 勾选后一次处理，原因统一记录 |
-| 新增 / 编辑 | 五维滑杆实时算总分；可上传图标；状态可选手「待审核 / 直接发布 / 草稿 / 驳回」 |
-| 批量导入 | JSON 或 CSV，默认进入待审核；`publish` 勾选后直接发布 |
-| 导出 | `/api/admin/export` 下载完整 JSON |
-| 修改密码 | 需要当前密码；改密后其它会话失效 |
+| 五维实测 | 连通、目录、补全、流式、并发，全部是真实 HTTP 请求的成功率 |
+| 模型评测 | 19 题题库 + 本地代码单测，性能/能力/上下文三项独立打分 |
+| 自动实测 | 定时串行复测，结果写回榜单，前后端自动刷新 |
+| 自动审核 | 访客提交后自动跑实测，达标直接上线，不达标转人工 |
+| 提交审核 | 蜜罐字段 + IP 限流，公开提交永远不能改已发布站点 |
+| 管理后台 | 增删改查、批量导入导出、批量审核、图标上传、改密 |
+| 登录防护 | scrypt 加盐、持久化防爆破、指数锁定、CSRF 全覆盖 |
+| 零依赖 | `package.json` 没有 `dependencies`，`node server.js` 就能跑 |
 
-## 评分规则
+---
+
+## 评分体系
+
+五个维度都是**成功率百分比**，按业务权重加权：
+
+| 维度 | 键名 | 权重 | 测什么 | SLA |
+|---|---|---|---|---|
+| 连通成功率 | `reach` | 10% | 首页 HTTP 可达、TTFB | ≤ 3000 ms |
+| 目录成功率 | `catalog` | 15% | `/v1/models` 可读、模型数量 | ≤ 5000 ms |
+| 补全成功率 | `chat` | 25% | `/v1/chat/completions` 正常回包 | ≤ 10000 ms |
+| 流式成功率 | `stream` | 25% | 首个 `data:` 分片到达时间 | ≤ 10000 ms |
+| 并发成功率 | `concurrent` | 25% | 3 路 + 5 路并发整轮完成 | ≤ 30000 ms |
 
 ```
-综合分 = 模型真实性×25% + 服务稳定性×25% + 基础可用性×20% + 站点安全×20% + 响应完整性×10%
-S ≥ 90 · A ≥ 80 · B ≥ 70 · C ≥ 60 · D < 60
+综合分 = reach×0.10 + catalog×0.15 + chat×0.25 + stream×0.25 + concurrent×0.25
 ```
 
-## 实测引擎（probe.js）
-
-五维分数默认由人工录入。点后台的「实测」或「全部实测」，服务端会对站点发真实网络请求，把四个维度替换成测出来的值，并记录探测元数据。
+等级：
 
 ```
-可用性 availability  DNS / TCP / TLS / TTFB 耗时，5xx 封顶 40，4xx 封顶 70
-稳定性 stability     连打 3 次：成功率×70% + TTFB 变异系数×30%
-安全   security      HTTPS +30、TLS1.3 +15、证书剩余天数分档、HSTS +10、nosniff +8、XFO/CSP +7、不暴露版本号 +10；明文 HTTP 封顶 30
-完整性 integrity     content-length 与实际字节一致 +30、content-type +15、结构可解析 +35、date 头 +10
-真实性 authenticity  无 Key 不判定，保留人工值并标记 basis=unverified
-                     有 Key 时：/v1/models 可读 +25、请求模型在列表 +15、补全 200 +20、回包 model 一致 +15、usage 完整 +15、finish_reason +5、正文非空 +5
+S ≥ 90   A ≥ 80   B ≥ 70   C ≥ 60   D < 60
 ```
 
-每个站点会多出 `probe` 字段：
+**缺测按 0 计入。** 没测到的维度就是没有分数支撑，不给"默认 60 分"这种安慰奖。
+
+---
+
+## 实测引擎
+
+`probe.js` 对目标站发真实请求，不做任何模拟：
+
+```
+连通   5 次首页请求，统计 TTFB 达标率
+目录   5 次 /v1/models，统计成功率和模型条数
+补全   8 次 /v1/chat/completions，统计 200 + 非空正文
+流式   8 次 stream=true，统计首个分片到达时间
+并发   3 路 + 5 路同时打，统计整轮成功率
+```
+
+每一维都记录逐次证据（耗时、状态码、是否达标），存进 `site.probe.evidence`，可以在后台点开看每一次的原始结果。
+
+探测结果结构：
 
 ```json
 {
-  "at": "2026-10-26T19:24:55.722Z",
+  "at": "2026-10-31T02:51:59.878Z",
+  "durationMs": 68001,
   "reachable": true,
-  "basis": { "availability": "probe", "authenticity": "unverified" },
-  "details": { "security": "HTTPS +30；TLS 1.3 +15；证书剩余 162 天 +20" },
-  "metrics": { "dns": 1.2, "tcp": 50.8, "tls": 104.5, "ttfb": 152.5, "protocol": "TLSv1.3", "certDays": 162, "ip": "1.95.77.214" }
+  "dims": { "reach": 100, "catalog": 100, "chat": 100, "stream": 100, "concurrent": 100 },
+  "samples": 3,
+  "metrics": { "dns": 0, "tcp": 179.8, "tls": 540.5, "ttfb": 718.1, "total": 768.5, "status": 200 },
+  "sla": { "reach": 3000, "catalog": 5000, "chat": 10000, "stream": 10000, "concurrent": 30000 }
 }
 ```
 
-接口：`POST /api/admin/sites/:id/probe` 单条，`POST /api/admin/probe-all` 全部已发布。探测串行执行，两者都返回 202，前端轮询 `/api/admin/sites` 的 `probing` 字段获知剩余数量。
+没有 API Key 时只能测连通和目录，补全/流式/并发三维留空。**这就是为什么提交表单要填 Key** —— 不填，榜单上就只有半个分数。
 
-真实性需要站点支持 OpenAI 兼容接口。在编辑弹窗填 API Key 与实测模型名后，实测会拉模型列表并发一次 `/v1/chat/completions`，核对回包的 model、usage、finish_reason。
+---
 
+## 模型质量评测
 
-## 模型质量评测（eval-models.js）
+站点分和模型分是两套东西，分开算、分开存、分开排序。
 
-五维打分量的是网站，模型分是另一套。这个模块回答"这家店卖的货到底怎么样"，全部由程序判定，不请模型当裁判。
-
-### 评什么
-
-| 面 | 权重 | 指标 | 怎么来的 |
+| 面 | 权重 | 指标 | 判分方式 |
 |---|---|---|---|
-| 性能 | 20% | TTFT、tok/s、抖动 | 流式请求 3 次，抓第一个 `data:` 分片的到达时间 |
-| 能力 | 60% | 19 题通过率 | 固定题库，正则 / JSON / 本地单测判分 |
-| 上下文 | 20% | 真实可捞回长度 | 逐级塞 8k / 32k，中间埋 `ZEBRA-7741`，看能不能捞回来 |
+| 性能 | 20% | TTFT、tok/s、抖动 | 流式请求 3 次，抓首个 `data:` 分片 |
+| 能力 | 60% | 19 题通过率 | 固定题库，正则 / JSON / 本地单测 |
+| 上下文 | 20% | 真实可捞回长度 | 逐级塞 8k / 32k，中间埋 `ZEBRA-7741` |
 
-### 题库（19 题）
+19 道题：
 
-| 类别 | 题数 | 判分方式 | 例子 |
+| 类别 | 题数 | 判分 | 例子 |
 |---|---|---|---|
-| 数学 | 5 | 正则提数，比对唯一答案 | `17 × 23 = ?` → 391 |
-| 指令跟随 | 5 | 严格格式校验 | "只输出 OK" → `trim() === "OK"`，多一个字就扣 |
+| 数学 | 5 | 正则提数比对 | `17 × 23 = ?` → `391` |
+| 指令跟随 | 5 | 严格格式校验 | "只输出 OK" → `trim() === "OK"` |
 | 中文理解 | 4 | 关键词命中 | "差点没摔倒" → 必须答"没摔倒" |
-| 代码 | 4 | 提取代码块 → 写临时 py → 跑单测 | `add()` / `reverse_string()` / `is_prime()` / `fib()` |
-| 工具调用 | 1 | `tool_calls` 结构 + arguments 合法 JSON | 问天气，检查 `get_weather({"city":"北京"})` |
+| 代码 | 4 | 提取代码块，写临时文件跑单测 | `add()` / `reverse_string()` / `is_prime()` / `fib()` |
+| 工具调用 | 1 | `tool_calls` 结构 + arguments 合法 JSON | `get_weather({"city":"北京"})` |
 
-代码题是本地的 `spawnSync`，6 秒超时，临时目录跑完即删。判分靠 `AssertionError` 是否出现，不靠模型自评。
+代码题是本机 `spawnSync` 跑 6 秒超时的单测，看有没有 `AssertionError`；开了 `EVAL_SANDBOX=1` 就只走 Docker：`--network=none`、只读根、非 root、128 MB 内存、0.5 CPU、64 PID、丢弃全部 capability。
 
-### 用法
-
-**后台**：编辑站点 → 填 `API Key` 和 `实测模型名` → 列表里点「评测」→ 30-90 秒后「模型分」列出数，点分数看完整报告。
-
-**HTTP**：
-
-```bash
-# 触发（body 可带 apiKey / model / baseUrl 覆盖）
-curl -X POST http://127.0.0.1:8803/api/admin/sites/<id>/eval \
-  -b ck.txt -H "x-csrf-token: <csrf>" \
-  -H "Content-Type: application/json" \
-  -d '{"apiKey":"sk-xxx","model":"gpt-4o-mini"}'
-
-# 轮询：GET /api/admin/sites 的 evaling 归零即完成
-```
-
-**命令行**：
+**分数不请模型当裁判。** 全部由程序判定，同一份回答永远得到同一个分。
 
 ```bash
 node eval-models.js --url=https://api.example.com --key=sk-xxx --model=gpt-4o-mini
 ```
 
-输出直接是完整 JSON，含 19 题逐题结果、TTFT、tok/s、上下文验证明细。
+输出完整 JSON：19 题逐题结果、TTFT、tok/s、上下文逐级验证明细。
 
-### 结果结构
+---
 
-```json
-{
-  "ok": true,
-  "model": "mock-gpt-4o",
-  "score": 100,
-  "parts": { "perf": 100, "ability": 100, "context": 100 },
-  "perf": { "ttft": 41.4, "tps": 146.9, "jitter": 0, "score": 100 },
-  "ability": {
-    "pass": 19, "total": 19, "rate": 100,
-    "byCat": [{ "cat": "数学", "pass": 5, "total": 5, "rate": 100 }]
-  },
-  "context": { "maxVerified": 32000, "score": 100, "levels": [...] },
-  "items": [{ "id": "math-1", "pass": true, "got": "391", "ms": 1.3 }]
-}
+## 自动实测与自动审核
+
+### 自动实测
+
+后台面板可开关、改间隔（5 分钟 – 24 小时，默认 5 分钟）、选范围（只看已发布 / 已发布 + 待审）。
+
+- 调度器每 30 秒检查 `db.settings.autoProbe.nextRunAt`，到点后串行执行，避免并发打爆目标站
+- 默认「只测有 API Key 的站点」：没有 Key 强行测会把补全/流式/并发打成 0
+- 每轮写回 `lastRunAt` / `lastFinishedAt` / `lastSummary`，按完成时间重算下一次，不会因为单轮耗时漂移
+
+### 自动审核
+
+访客提交站点时如果填了 API Key，系统自动排队实测，按三项标准判定：
+
+| 条件 | 默认值 |
+|---|---|
+| 综合分 | ≥ 75 |
+| 任一已测维度 | ≥ 60 |
+| 至少测到维度数 | 5 |
+
+三项全满足 → 直接 `published` 上线；任一不满足 → 留在 `pending` 等人工，并记录未通过原因。
+
+```
+[approve]  TinyGate  自动审核通过 — 综合分 100（S）· 连通 100 / 目录 100 / 补全 100 / 流式 100 / 并发 100
+[auto-review] 某站点  自动审核未通过 — 站点不可达
 ```
 
-### 已验证的判分行为
+阈值存在 `db.settings.autoReview`，后台「自动实测」面板可改，保存即时生效。只对 `pending` 站点生效，已发布站点的定期复测不会改状态。
 
-同一个 mock 服务，两种应答：
+---
 
-| 模式 | 总分 | 性能 | 能力 | 上下文 | 说明 |
-|---|---|---|---|---|---|
-| 全对 | 100 | 100 | 19/19 | 32k 捞出 | 代码题本地单测真跑通 |
-| 全错 | 24.5 | 92.5 | 0/19 | 捞不回 | 4 道代码题报 `AssertionError`；工具题返回纯文本被判失败；回包 `model` 字段被改成 `some-other-model`，被逐题记录抓出 |
+## 审核流程
 
-性能分和能分是独立的：全错那份性能还有 92.5，因为响应确实快。这就是模型质量评测该有的样子——快和聪明分开算。
+```
+访客提交 /api/submit ─┐
+后台新增站点 ─────────┼─→ status=pending ─→ 自动实测 ─┬─ 达标 → published（自动）
+批量导入 ─────────────┘                              └─ 不达标 → 人工审核 ─┬─ approve → published
+                                                                          └─ reject  → rejected
+```
 
-### 模型分与综合分的关系
+公开接口 `GET /api/sites` 只返回 `published`。待审、驳回、草稿一律不出现。
 
-综合分（`score`）= 五维加权，量的是站点线路和配置。
+后台动作：
 
-模型分（`modelScore`）= 上表三项加权，量的是模型本身。
+| 操作 | 说明 |
+|---|---|
+| 通过 | `pending/rejected → published` |
+| 驳回 | 必须填原因，公开榜不可见 |
+| 回待审 | `published/rejected → pending` |
+| 批量通过 / 驳回 | 勾选后一次处理 |
+| 新增 / 编辑 | 五维滑杆实时算总分，可上传图标 |
+| 批量导入 | JSON 或 CSV，默认进待审 |
+| 导出 | `/api/admin/export`，API Key 脱敏 |
 
-两者独立存储、独立展示、独立排序，互不污染。没跑过评测的站点模型分显示 `—`。
+---
 
-## 接口
+## 快速开始
+
+```bash
+git clone https://github.com/<your-name>/relayrank.git
+cd relayrank
+node server.js --port=8803
+```
+
+打开：
+
+- 前台：`http://127.0.0.1:8803/`
+- 后台：`http://127.0.0.1:8803/admin`
+- 首次启动自动生成 `data/initial-admin.txt`，里面是 `admin` 和随机 20 位密码
+
+Windows 双击 `run.cmd` 也行，它会自动探测数据目录并设置环境变量。
+
+预设密码：
+
+```bash
+ADMIN_PASSWORD='至少12位强密码' node server.js
+```
+
+---
+
+## 配置项
+
+| 环境变量 | 默认 | 说明 |
+|---|---|---|
+| `PORT` | `8803` | 监听端口 |
+| `HOST` | `0.0.0.0` | 监听地址，生产建议 `127.0.0.1` |
+| `DATA_DIR` | `./data` | 数据库与会话存放目录 |
+| `LOG_DIR` | `./logs` | 日志目录 |
+| `TRUST_PROXY` | `1` | 反代后取 `X-Forwarded-For` |
+| `COOKIE_SECURE` | 自动 | HTTPS 下为 `1`；纯 HTTP 必须设 `0` |
+| `ADMIN_PASSWORD` | 随机 | 启动时覆盖管理员密码，至少 12 位 |
+| `KEY_ENCRYPTION_KEY` | 空 | 设置后 API Key 用 AES-256-GCM 加密落盘 |
+| `ENABLE_DETECTIVE` | `1` | 是否反代模型侦探 Flask 服务 |
+| `DETECTIVE_PORT` | `5000` | 侦探服务端口 |
+| `EVAL_SANDBOX` | `0` | 设为 `1` 时代码题只走 Docker |
+
+`detective.config.json` 管侦探的 `dir` / `python` / `port` / `enabled` / `autostart`。
+
+---
+
+## HTTP 接口
 
 | 方法 | 路径 | 鉴权 |
 |---|---|---|
 | GET | `/api/health` | 否 |
 | GET | `/api/sites` | 否（仅 published） |
-| POST | `/api/submit` | 否（限流 10 次/10 分钟/IP，带蜜罐字段；不直接改已发布站点） |
-| POST | `/api/admin/login` | 密码，限流 5 次/5 分钟（用户名+IP） |
-| POST | `/api/admin/logout` | CSRF |
+| POST | `/api/submit` | 否（10 次/10 分钟/IP，带蜜罐字段） |
+| POST | `/api/admin/login` | 密码，5 次/5 分钟 |
 | GET | `/api/admin/session` | Cookie |
 | GET | `/api/admin/sites?status=` | Cookie |
 | POST | `/api/admin/sites` | Cookie + CSRF |
-| PUT/DELETE | `/api/admin/sites/:id` | Cookie + CSRF |
+| PUT / DELETE | `/api/admin/sites/:id` | Cookie + CSRF |
 | POST | `/api/admin/sites/:id/probe` | Cookie + CSRF |
-| POST | `/api/admin/sites/:id/eval` | Cookie + CSRF，`{apiKey, model, baseUrl?}` → 202 |
-| POST | `/api/admin/reviews/bulk` | Cookie + CSRF，`{ids, action, reason}` |
-| GET | `/api/admin/reviews` | Cookie |
+| POST | `/api/admin/sites/:id/eval` | Cookie + CSRF |
+| POST | `/api/admin/sites/:id/review` | Cookie + CSRF，`{action: approve\|reject\|reset}` |
+| POST | `/api/admin/reviews/bulk` | Cookie + CSRF |
 | POST | `/api/admin/import` | Cookie + CSRF，`{format: json\|csv, text, publish}` |
-| POST | `/api/admin/upload` | Cookie + CSRF，仅 PNG/JPG/WEBP/ICO，≤2 MB |
-| GET | `/api/admin/export` | Cookie（API Key 脱敏） |
+| POST | `/api/admin/upload` | Cookie + CSRF，仅 PNG/JPG/WEBP/ICO，≤ 2 MB |
+| GET | `/api/admin/export` | Cookie |
 | POST | `/api/admin/password` | Cookie + CSRF |
 
-## 登录与恢复
+提交示例：
 
-| 方式 | 地址 | 说明 |
-|---|---|---|
-| 表单登录 | `/admin` → `POST /login-form` | 成功后写入 HttpOnly Cookie，不再把 token 放进 URL |
-| 命令行重置 | `node scripts/set-password.js 新密码` | 只换密码，不动站点/API Key；至少 12 位；清空全部旧会话 |
-| 启动时覆盖 | `ADMIN_PASSWORD=新密码 node server.js` 或 `node server.js --password=新密码` | 至少 12 位；会清空全部旧会话 |
-| 紧急恢复 | `KEEP_PASSWORD=1 node scripts/security-reset.js` | 只清会话/密钥，不轮换密码 |
+```bash
+curl -X POST http://127.0.0.1:8803/api/submit \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "MyRelay",
+    "domain": "api.example.com",
+    "url": "https://api.example.com",
+    "kind": "commercial",
+    "apiKey": "sk-xxx",
+    "note": "稳定，支持 Claude / GPT"
+  }'
+```
 
-- 会话只存 `sha256(sid)` 与随机 CSRF，数据库泄露不能直接重放 Cookie
-- Cookie：`HttpOnly; SameSite=Strict; Secure`（生产环境），8 小时绝对过期
-- 服务端不接受 `?tk=`、不提供 Basic 认证；旧版明文会话在启动时全部失效，需重新登录
-- 所有写操作校验 `X-CSRF-Token`
-- 登录防爆破（持久化在 `data/login-guard.json`，重启不清零）：
-  - 同一「用户名 + IP」15 分钟内失败 5 次 → 锁定 15 分钟，连续触发按 2 倍递增（15/30/60… 分钟）
-  - 同一 IP 15 分钟内失败 20 次 → 锁定 30 分钟，同样指数递增
-  - 全站失败超过 120 次/分钟 → 全局暂停 60 秒
-  - 账号不存在时也执行一次 scrypt 校验，避免通过响应时间枚举用户名
-  - 后台「登录防护」面板可查看锁定记录并手动解锁；命令行 `node scripts/unlock-login.js --clear`
-- 登录页底部灰字显示服务信息，用于确认连的是哪个服务实例
+返回：
 
-## 模型侦探（/detective）
+```json
+{
+  "ok": true,
+  "status": "pending",
+  "autoReview": true,
+  "message": "提交成功，正在自动实测；综合分与五维达标后自动上线，不达标进人工审核。",
+  "id": "st_7f412def2431"
+}
+```
 
-前台导航「模型侦探」会以同源 iframe 打开 `http://127.0.0.1:5000` 的 Flask 检测台，路径 `/detective/*` 由 Node 反向代理，静态资源 `/static/*` 与接口 `/api/*` 自动改写到 `/detective/` 前缀。
+---
 
-- 默认公开访问；设置 `DETECTIVE_REQUIRE_LOGIN=1` 后必须登录后台才能使用
-- 默认开启自动拉起：`detective.config.json` 配置 `dir` / `python` / `port`，Node 启动时探测端口，未监听则 `spawn` Python，日志写 `logs/detective.log`
-- 关闭检测台：`ENABLE_DETECTIVE=0` 或配置 `"enabled": false`
-- 关闭自动拉起：`DETECTIVE_AUTOSTART=0` 或配置 `"autostart": false`
-- 检测台离线时返回可重试的说明页，并自动尝试重新拉起；状态接口 `GET /api/detective/status`
-- 检测台页面使用独立 CSP（允许内联脚本与 Google Fonts），不影响主站 `script-src 'self'`
+## 安全设计
 
-## 自动实测（默认每 1 小时）
+这不是一个"能跑就行"的玩具，默认就按公网可暴露的标准写：
 
-后台「自动实测」面板可开关、改间隔（15 分钟 – 24 小时）、选择范围，并显示下次执行时间、上次结果与当前进度。
+- **密码**：`scrypt` 加盐哈希；登录接口不返回 token
+- **会话**：库里只存 `sha256(sid)` 和随机 CSRF，Cookie 是 `HttpOnly; SameSite=Strict; Secure`，8 小时绝对过期
+- **CSRF**：所有写操作校验 `X-CSRF-Token`
+- **防爆破**：同一「用户名 + IP」15 分钟失败 5 次锁 15 分钟，连续触发按 2 倍递增；同一 IP 15 分钟失败 20 次锁 30 分钟；全站 120 次/分钟暂停 60 秒；账号不存在也执行一次 scrypt，避免响应时间枚举
+- **SSRF**：只允许 HTTP/HTTPS，默认拒绝私网/回环/链路本地/云元数据地址；带 Key 的请求只允许 HTTPS；DNS 解析结果固定后连接，防 rebinding
+- **响应体上限**：探测 2 MB、评测 4 MB，总超时 = 单次超时 + 2 秒
+- **上传**：只收 PNG/JPG/WEBP/ICO，按文件头校验，拒 SVG；SVG 静态文件额外加 `CSP: sandbox`
+- **静态目录**：`path.relative` + `realpath` 双重校验，阻止 `..` 与符号链接逃逸
+- **密钥**：设置 `KEY_ENCRYPTION_KEY` 后 API Key 用 AES-256-GCM 加密；后台列表和导出永远脱敏
+- **数据**：原子写入（临时文件 + rename），损坏自动回滚 `db.json.bak`
+- **日志**：token / key / password 参数全部脱敏
 
-- 调度器每 30 秒检查一次 `db.settings.autoProbe.nextRunAt`，到点后按队列串行实测，避免并发打爆目标站
-- 默认「只测有 API Key 的站点」：没有 Key 的站点无法完成补全/流式/并发测试，强行实测会把分数打成 0；需要测全部时取消勾选
-- 每轮结束写回 `lastRunAt` / `lastFinishedAt` / `lastSummary`，并按完成时间重算下一次，不会因为单轮耗时漂移
-- 手动触发：`POST /api/admin/auto-probe/run`；保存设置：`POST /api/admin/settings/auto-probe`
+---
 
-## 安全基线（本版本已内置）
+## 生产部署
 
-- 密码 `scrypt` 加盐哈希；`/api/admin/login` 不返回 token
-- 统一安全响应头：CSP（`script-src 'self'`）、HSTS、`X-Frame-Options`、`nosniff`、`Referrer-Policy`、`Permissions-Policy`
-- 公开提交不能修改已发布站点；待审站点只允许同域名、未存 Key 时补充模型/备注
-- SSRF 防护：只允许 HTTP/HTTPS，默认拒绝私网/回环/链路本地/云元数据地址；带 API Key 的请求只允许 HTTPS；DNS 解析结果固定后连接，防 DNS rebinding
-- 探测响应体上限 2 MB、总超时 = 单次超时 + 2 秒；评测响应体上限 4 MB
-- 模型代码题默认禁用。`EVAL_SANDBOX=1` 后只通过 Docker 执行：`--network=none`、只读根、非 root、128 MB 内存、0.5 CPU、64 PID、丢弃全部 capability
-- 上传只接受 PNG/JPG/WEBP/ICO，按文件头校验，拒绝 SVG；SVG 静态文件额外加 `CSP: sandbox`
-- `/detective` 默认开启并公开；需要登录时设置 `DETECTIVE_REQUIRE_LOGIN=1`
-- 数据库原子写入（临时文件 + rename），损坏自动回滚 `db.json.bak`；读取时自动剥离 UTF-8 BOM，手工编辑过的 `db.json` 不会再把站点挡在启动阶段
-- 日志对 token/key/password 参数脱敏
-- 后台不返回明文 API Key（列表/导出脱敏），新增/修改时仍可写入
-- 设置 `KEY_ENCRYPTION_KEY` 后，`db.json` 里的 API Key 使用 AES-256-GCM 加密；生成方式 `openssl rand -base64 32`，写入 `/etc/relayrank.env`（权限 600），丢失该 Key 将无法解密已有 Key
-- 静态目录用 `path.relative` + `realpath` 双重校验，阻止 `..` 与符号链接逃逸；`/api/health` 不再暴露端口与站点数
+### Linux（nginx + systemd + TLS）
 
-## 生产部署（nginx + systemd + TLS）
-
-Node 只监听回环，TLS 和限流交给 nginx。不要直接把 8803 暴露到公网。
-
-Ubuntu 24.04 基础依赖：
+Node 只监听回环，TLS 和限流交给 nginx。
 
 ```bash
 sudo apt update
-sudo apt install -y curl unzip nginx certbot python3-certbot-nginx ufw
+sudo apt install -y nginx certbot python3-certbot-nginx
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt install -y nodejs
-node -v
-```
-
-`/etc/nginx/conf.d/relayrank.conf`：
-
-```nginx
-server {
-    listen 80;
-    server_name rank.example.com;
-    return 301 https://$host$request_uri;
-}
-
-server {
-    listen 443 ssl http2;
-    server_name rank.example.com;
-
-    ssl_certificate     /etc/letsencrypt/live/rank.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/rank.example.com/privkey.pem;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
-
-    client_max_body_size 10m;
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-
-    location / {
-        proxy_pass http://127.0.0.1:8803;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto https;
-        proxy_read_timeout 300s;
-        proxy_buffering off;
-    }
-}
 ```
 
 `/etc/systemd/system/relayrank.service`：
@@ -327,64 +366,35 @@ UMask=0077
 WantedBy=multi-user.target
 ```
 
-`/etc/relayrank.env`（权限 600，仅 root 可读）：
+nginx 反代：
 
-```bash
-ADMIN_PASSWORD=替换成至少12位强密码
-KEY_ENCRYPTION_KEY=替换成 openssl rand -base64 32 的输出
-```
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name rank.example.com;
 
-日志轮转 `/etc/logrotate.d/relayrank`：
+    ssl_certificate     /etc/letsencrypt/live/rank.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/rank.example.com/privkey.pem;
 
-```text
-/var/log/relayrank/*.log {
-    daily
-    rotate 14
-    missingok
-    notifempty
-    compress
-    copytruncate
-    create 0600 relayrank relayrank
+    client_max_body_size 10m;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+    location / {
+        proxy_pass http://127.0.0.1:8803;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 300s;
+        proxy_buffering off;
+    }
 }
 ```
 
-部署命令：
+### Windows Server（一键）
 
-```bash
-sudo useradd --system --home /opt/relayrank --shell /usr/sbin/nologin relayrank
-sudo mkdir -p /opt/relayrank /var/lib/relayrank /var/log/relayrank
-sudo unzip -o /tmp/relayrank-site-hardened-20261028.zip -d /tmp/relayrank-release
-sudo cp -a /tmp/relayrank-release/relayrank-site/. /opt/relayrank/
-sudo chown -R relayrank:relayrank /opt/relayrank /var/lib/relayrank /var/log/relayrank
-sudo chmod 700 /var/lib/relayrank
-
-ADMIN_PASSWORD="$(openssl rand -base64 24 | tr -d '\n')"
-KEY_ENCRYPTION_KEY="$(openssl rand -base64 32)"
-sudo install -m 600 /dev/null /etc/relayrank.env
-sudo tee /etc/relayrank.env >/dev/null <<EOF
-ADMIN_PASSWORD=$ADMIN_PASSWORD
-KEY_ENCRYPTION_KEY=$KEY_ENCRYPTION_KEY
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl enable --now relayrank
-sudo systemctl status relayrank
-sudo cat /var/lib/relayrank/initial-admin.txt
-```
-
-登录后台改密后删除 `/var/lib/relayrank/initial-admin.txt`，再执行：
-
-```bash
-sudo systemctl restart relayrank
-```
-
-发布 zip 不要包含 `data/`、`logs/`、`backup-*/`、`dist/`。生产数据在 `/var/lib/relayrank`，`db.json` 里有会话哈希和 API Key，属于机密数据；`/var/lib/relayrank/initial-admin.txt` 登录后立即删除。
-
-## Windows Server 一键部署
-
-发行包根目录带 `deploy-windows.ps1` 和 `deploy-windows.cmd`，适用于 Windows Server 2019/2022/2025 全新服务器。
-
-直接双击 `deploy-windows.cmd`，按提示输入域名和邮箱；或在管理员 PowerShell 执行：
+发行包根目录带 `deploy-windows.ps1` 和 `deploy-windows.cmd`：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\deploy-windows.ps1 `
@@ -392,45 +402,74 @@ powershell -ExecutionPolicy Bypass -File .\deploy-windows.ps1 `
   -Email admin@example.com
 ```
 
-脚本自动完成：
+脚本自动完成：安装 Node.js 22 LTS、内置 NSSM 注册服务、下载 Caddy 配自动 HTTPS、建目录、设权限、放行防火墙、生成管理员密码和加密密钥。
 
-- 安装或检查 Node.js 22 LTS；
-- 使用内置 NSSM，下载 Caddy；
-- 创建 `C:\apps\relayrank`、`C:\ProgramData\RelayRank`；
-- 设置 LocalService 文件权限；
-- 注册 `RelayRank` 和 `Caddy` 两个 Windows 服务；
-- 配置 Caddy 自动 HTTPS 和反向代理；
-- 放行 Windows 防火墙 80/443；
-- 生成管理员初始密码和 API Key 加密密钥。
+执行前把域名 A 记录指向服务器公网 IP，确认 80/443 没被 IIS 占用。
 
-执行前把域名 A 记录指向服务器公网 IP，并确认服务器没有 IIS 占用 80/443。脚本需要管理员 PowerShell。
+---
 
-## 目录
+## 目录结构
 
 ```
 relayrank-site/
-├─ security.js         URL/SSRF/会话/安全头工具
-├─ login-guard.js      登录防爆破（持久化计数 + 指数锁定）
-├─ secret-box.js       API Key 的 AES-256-GCM 加密/解密
-├─ eval-sandbox.js     Docker 隔离的 Python 单测执行器
-├─ probe.js            真实探测引擎（DNS/TCP/TLS/HTTP 五维打分）
-├─ eval-models.js      模型质量评测引擎（题库 + 判分）
-├─ server.js           服务端（HTTP + 存储 + 鉴权 + 审核 + 自动实测 + 侦探反代）
+├─ server.js            服务端（HTTP + 存储 + 鉴权 + 审核 + 自动实测 + 侦探反代）
+├─ probe.js             探测引擎（DNS/TCP/TLS/HTTP 五维成功率）
+├─ eval-models.js       模型评测引擎（19 题题库 + 判分）
+├─ eval-sandbox.js      Docker 隔离的 Python 单测执行器
+├─ security.js          URL/SSRF/会话/安全头工具
+├─ login-guard.js       登录防爆破（持久化计数 + 指数锁定）
+├─ secret-box.js        API Key 的 AES-256-GCM 加解密
 ├─ detective.config.json  模型侦探目录/端口/自动拉起配置
-├─ run.cmd             Windows 启动入口（数据目录 + 侦探环境变量）
-├─ deploy-windows.ps1  Windows Server 一键部署脚本
-├─ deploy-windows.cmd  双击运行入口（自动提权/输入域名）
-├─ tools/nssm.exe      内置 NSSM 2.24 x64（无需联网下载）
+├─ run.cmd              Windows 启动入口
+├─ deploy-windows.ps1   Windows Server 一键部署
+├─ tools/nssm.exe       内置 NSSM 2.24 x64
 ├─ scripts/
-│  ├─ security-reset.js  清会话/清 Key/轮换管理员密码
-│  └─ unlock-login.js    查看/清除登录失败锁定
-├─ data/               运行时生成，禁止打包
+│  ├─ security-reset.js  清会话 / 清 Key / 轮换密码
+│  ├─ set-password.js    只换密码，不动站点
+│  └─ unlock-login.js    查看 / 清除登录锁定
+├─ data/                运行时生成，禁止打包
 │  ├─ db.json
 │  ├─ login-guard.json
 │  └─ initial-admin.txt
 └─ public/
    ├─ index.html  styles.css  app.js     前台榜单
-   ├─ admin.html  admin.css   admin.js  后台
-   ├─ admin-boot.js  admin-fallback.js   后台启动检查/兜底登录
-   └─ uploads/    图标（seed/ 为示例站图标）
+   ├─ admin.html  admin.css   admin.js  管理后台
+   ├─ admin-boot.js  admin-fallback.js   启动检查 / 兜底登录
+   └─ uploads/    站点图标（seed/ 为例图）
 ```
+
+---
+
+## 设计取舍
+
+**为什么不用数据库？**
+站点量级是几百到几千，`db.json` 全量读进内存完全够用。省掉 ORM、连接池、迁移脚本，部署就是解压 + `node server.js`。原子写入 + `.bak` 回滚已经覆盖单机场景的可靠性需求。
+
+**为什么探测要串行？**
+并发探测会把目标站打限流，测出来的"成功率"是探测器自己造成的。串行慢一点，但数据是真的。
+
+**为什么缺测按 0 算？**
+"没测到"和"测了很好"是两回事。给缺测默认分会让没配 Key 的站点凭空拿到一个体面分数，榜单就失去意义了。
+
+**为什么模型分和站点分分开？**
+站点分衡量线路和配置，模型分衡量模型本身。混在一起，一个快但笨的模型会被线路分拉高，一个聪明但慢的模型会被线路分拖低。
+
+**为什么自动审核还要保留人工？**
+自动审核只处理"有 Key + 五维齐全 + 分数够"的提交，覆盖大部分正常情况。没 Key、测不全、分数擦线的，交给人工看日志和备注。自动化省掉重复劳动，不替代判断。
+
+---
+
+## 路线图
+
+- [ ] 历史趋势图（每个站点五维随时间变化）
+- [ ] 多节点探测（不同地区分别测，取中位数）
+- [ ] 站点对比页（并排看两家的逐项差异）
+- [ ] 公开 API 的只读 Token
+- [ ] 探测结果导出 CSV
+- [ ] 模型评测题库可配置
+
+---
+
+## 许可
+
+仓库暂未声明开源许可证。使用、修改、分发前请先联系作者。

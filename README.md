@@ -1,5 +1,13 @@
 # RelayRank · 大模型中转站测评榜单｜自助提交站点 · 自动实测审核 · 公开榜单推广
 
+<h3 align="center">🌐 在线榜单：<a href="http://49.232.81.225">http://49.232.81.225</a></h3>
+
+<p align="center">
+打开就能看 · 已实测站点 · 五维分数 · 模型评测 · 访问地址全部公开 · 无需注册
+</p>
+
+**RelayRank 是什么**：一个公开的大模型 API 中转站测评榜单。每个站点跑五维真实探测——可用性、响应延迟、生成速度、稳定性、价格——再做模型质量评测，综合成总分。分数、原始数据和访问地址全部公开在页面上，任何人都能查，不需要注册账号。
+
 > An open-source **benchmark and leaderboard for AI API relay / gateway stations** — five-dimension live probing, model quality evaluation, automatic review, and a public ranking board. Zero-dependency single-file Node.js server, no database required.
 
 

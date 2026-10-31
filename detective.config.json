@@ -1,0 +1,10 @@
+{
+  "enabled": true,
+  "requireLogin": false,
+  "autostart": true,
+  "host": "127.0.0.1",
+  "port": 5000,
+  "dir": "..\\model-detective-v5",
+  "python": "..\\model-detective-v5\\.venv\\Scripts\\python.exe",
+  "script": "run_web.py"
+}

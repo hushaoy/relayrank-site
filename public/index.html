@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>大模型中转站测评榜单 · 中转站排行榜</title>
+<meta name="description" content="基于连通、目录、补全、流式、并发五项真实请求成功率的中转站测评榜单，数据全部来自实测。" />
+<link rel="icon" type="image/svg+xml" href="/uploads/favicon.svg" />
+<link rel="icon" type="image/x-icon" href="/uploads/favicon.ico" />
+<link rel="apple-touch-icon" href="/uploads/apple-touch-icon.png" />
+<link rel="stylesheet" href="/styles.css?v=53" />
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="/">
+      <span class="brand-name">RelayRank</span>
+    </a>
+
+    <nav class="header-nav">
+      <a class="is-active" href="/">榜单</a>
+      <a href="#dimensions">评测体系</a>
+      <a href="#methodology">方法论</a>
+      <a href="#" id="submit-open">提交站点</a>
+    </nav>
+
+    <div class="header-actions">
+      <button type="button" class="header-btn" id="theme-toggle" aria-label="切换主题" title="切换主题">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"></path></svg>
+      </button>
+      <a class="header-btn" href="/admin" aria-label="登录后台" title="登录后台">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10.5" width="16" height="9.5" rx="2"></rect><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"></path><circle cx="12" cy="15.2" r="1.15"></circle></svg>
+      </a>
+    </div>
+  </div>
+</header>
+
+<div class="benchmark-page">
+
+  <section class="hero shell">
+    <div class="hero-copy">
+      <div class="eyebrow"><span></span> RelayRank · 大模型中转站测评</div>
+      <h1>大模型中转站测评榜单</h1>
+      <p>五项请求成功率加权评分，覆盖连通、目录、补全、流式、并发。站点由提交者自助登记，分数按 SLA 内实测结果实时重算。</p>
+
+      <div class="stats" aria-label="测评统计">
+        <div><strong id="stat-sites">—</strong><span>中转站</span></div>
+        <div><strong id="stat-models">—</strong><span>模型通道</span></div>
+        <div><strong class="warning" id="stat-issues">—</strong><span>存在问题的模型</span></div>
+        <div><strong class="danger" id="stat-down">—</strong><span>不可用模型</span></div>
+      </div>
+
+    </div>
+
+    <div class="network-card" aria-label="模型与中转服务示意图">
+      <div class="network-glow"></div>
+      <svg class="network-lines" viewBox="0 0 620 330" aria-hidden="true">
+        <path d="M148 48 C248 48 228 154 310 154"></path>
+        <path d="M148 104 C230 104 236 160 310 160"></path>
+        <path d="M148 160 C230 160 236 166 310 166"></path>
+        <path d="M148 216 C230 216 238 173 310 173"></path>
+        <path d="M390 154 C472 154 452 62 540 62"></path>
+        <path d="M390 160 C466 160 466 128 540 128"></path>
+        <path d="M390 167 C466 167 466 194 540 194"></path>
+        <path d="M390 174 C474 174 452 260 540 260"></path>
+      </svg>
+      <div class="hero-model-list">
+        <div class="model-node left n1"><span class="dot"></span><span>OpenAI</span></div>
+        <div class="model-node left n2"><span class="dot"></span><span>Claude</span></div>
+        <div class="model-node left n3"><span class="dot"></span><span>DeepSeek</span></div>
+        <div class="model-node left n4"><span class="dot"></span><span>Gemini</span></div>
+      </div>
+      <div class="hub-node"><span>API</span><b>中转服务</b></div>
+      <div class="hero-model-list">
+        <div class="model-node right r1"><span class="dot"></span><span>GLM</span></div>
+        <div class="model-node right r2"><span class="dot"></span><span>Qwen</span></div>
+        <div class="model-node right r3"><span class="dot"></span><span>MiMo</span></div>
+        <div class="model-node right r4"><span class="dot"></span><span>Grok</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="summary-grid shell">
+    <article class="summary-card recommended">
+      <div class="card-head">
+        <h2><span class="head-icon">♛</span>推荐中转站</h2>
+        <button type="button" data-jump="all">查看全部 <span>→</span></button>
+      </div>
+      <div class="mini-list" id="top-list"><p class="mini-empty">加载中…</p></div>
+    </article>
+
+    <article class="summary-card risk">
+      <div class="card-head">
+        <h2><span class="head-icon">!</span>风险提示</h2>
+        <button type="button" data-jump="risk">只看风险 <span>→</span></button>
+      </div>
+      <div class="mini-list" id="risk-list"><p class="mini-empty">加载中…</p></div>
+    </article>
+  </section>
+
+  <section class="benchmark shell" id="ranking">
+    <div class="benchmark-head">
+      <div>
+        <div class="section-kicker" id="ranking-kicker">中转站综合榜</div>
+        <h2 id="ranking-title"><span id="ranking-name">站点总览</span><small id="ranking-count">—</small></h2>
+      </div>
+      <div class="head-meta" id="head-meta">
+        <div><span>站点</span><b id="meta-sites">—</b></div>
+        <div><span>已实测</span><b id="meta-probed">—</b></div>
+        <div><span>更新</span><b id="meta-updated">—</b></div>
+      </div>
+    </div>
+
+    <div class="dimension-tabs" role="tablist" aria-label="排序维度" id="dimension-tabs">
+      <button class="active" data-sort="score">综合评分</button>
+      <button data-sort="reach">连通成功率</button>
+      <button data-sort="catalog">目录成功率</button>
+      <button data-sort="chat">补全成功率</button>
+      <button data-sort="stream">流式成功率</button>
+      <button data-sort="concurrent">并发成功率</button>
+    </div>
+
+    <div class="filterbar">
+      <label class="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="m16 16 4 4"></path></svg>
+        <input id="search-input" placeholder="搜索站点名称或域名…" autocomplete="off" />
+      </label>
+
+      <label class="select-control">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"></path><path d="M7 12h10"></path><path d="M10 18h4"></path></svg>
+        <select id="status-filter" aria-label="按状态筛选">
+          <option value="all">全部状态</option>
+          <option value="ok">正常</option>
+          <option value="warn">存在风险</option>
+          <option value="bad">不可用</option>
+          <option value="risk">仅看风险站点</option>
+        </select>
+      </label>
+
+      <label class="select-control">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z"></path><path d="m9 12 2 2 4-4"></path></svg>
+        <select id="grade-filter" aria-label="按等级筛选">
+          <option value="all">全部等级</option>
+          <option value="S">S</option>
+          <option value="A">A</option>
+          <option value="B">B</option>
+          <option value="C">C</option>
+          <option value="D">D</option>
+        </select>
+      </label>
+
+      <button type="button" class="reset-btn" id="reset-btn">重置</button>
+    </div>
+
+    <div class="table-wrap">
+      <table id="ranking-table">
+        <thead id="ranking-head"></thead>
+        <tbody id="ranking-body"><tr><td class="loading">正在加载榜单…</td></tr></tbody>
+      </table>
+      <div class="empty-state" id="empty-state" hidden>
+        <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4 19h16M6 16V8l6-4 6 4v8M9 16v-5h6v5"></path>
+          <path d="M2 19h20" opacity=".45"></path>
+        </svg>
+        <p class="empty-title" id="empty-title">还没有站点</p>
+        <p class="empty-sub" id="empty-sub">提交第一个站点，这里就会有排名。</p>
+        <button type="button" class="btn primary" id="empty-action">提交站点</button>
+      </div>
+    </div>
+
+    <div class="table-footer">
+      <p id="table-count">—</p>
+      <p class="footer-hint">数据来源：站点自助提交 · 分数由 5 项请求成功率加权自动计算 · 点表头排序，同分按综合评分、实测时间依次判定，没实测的维度沉底</p>
+    </div>
+  </section>
+
+  <section class="dimensions shell" id="dimensions">
+    <div class="section-title">
+      <div>
+        <span>评测体系</span>
+        <h2>5 项请求成功率 · 加权总分</h2>
+      </div>
+    </div>
+    <div class="dimension-grid" id="dimension-grid"></div>
+  </section>
+
+  <section class="methodology shell" id="methodology">
+    <div>
+      <span class="method-icon">?</span>
+      <div>
+        <strong>评分方法透明、可追溯</strong>
+        <p>综合分 = 连通成功率 ×10% + 目录成功率 ×15% + 补全成功率 ×25% + 流式成功率 ×25% + 并发成功率 ×25%。每项都是「SLA 内达标次数 / 尝试次数」：连通 TTFB ≤3000ms、目录 ≤5000ms、补全 ≤10000ms、流式首个 token ≤10000ms、并发整轮 ≤30000ms，超出时限算失败，未测到的维度按 0 计。等级按 90 / 80 / 70 / 60 分档。</p>
+      </div>
+    </div>
+  </section>
+</div>
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <p class="footer-disclaimer">本站为中转站测评榜单的自建版本，榜单数据全部保存在本地 JSON，不依赖第三方服务；评分只反映该站点的维度实测与登记数值。</p>
+    <div class="footer-meta">
+      <span class="footer-brand">RelayRank</span>
+      <nav class="footer-links"><a href="#dimensions">评测体系</a><a href="#methodology">方法论</a></nav>
+      <span class="footer-copy" id="footer-updated">—</span>
+    </div>
+  </div>
+</footer>
+
+<div class="modal" id="submit-modal" hidden>
+  <div class="modal-mask" data-submit-close="1"></div>
+  <form class="modal-card" id="submit-form">
+    <header class="modal-head">
+      <div>
+        <h2>提交中转站</h2>
+        <p class="modal-sub">提交后进入审核队列，通过后才会出现在榜单</p>
+      </div>
+      <button type="button" class="icon-btn" data-submit-close="1" aria-label="关闭">✕</button>
+    </header>
+
+    <div class="modal-body">
+      <div class="grid-2">
+        <label class="field"><span>站点名称 *</span><input name="name" id="sub-name" required maxlength="80" placeholder="例如：MyRelay" /></label>
+        <label class="field"><span>域名 *</span><input name="domain" id="sub-domain" required placeholder="example.com" /></label>
+      </div>
+      <div class="grid-2">
+        <label class="field"><span>访问地址</span><input name="url" id="sub-url" placeholder="https://example.com" /></label>
+        <label class="field"><span>支持模型数</span><input name="models" id="sub-models" type="number" min="0" value="0" readonly title="由下方所选模型自动统计" /></label>
+      </div>
+      <div class="field">
+        <span>探测地址（可选，只用于测模型，与访问地址无关）</span>
+        <input name="evalBaseUrl" id="sub-evalbase" maxlength="300" placeholder="https://api.example.com  留空则用访问地址" />
+      </div>
+      <div class="field">
+        <span>API Key（拉取目录 + 实测打分用，仅审核后台可见）</span>
+        <input name="apiKey" id="sub-apikey" autocomplete="off" spellcheck="false" maxlength="200" placeholder="sk-…  不填就只能人工核验，跑不了实测" />
+      </div>
+      <div class="field">
+          <span>支持的模型（从站点真实目录勾选）</span>
+          <div class="model-picker">
+            <div class="picker-bar">
+              <button type="button" class="btn ghost sm" id="sub-fetch-models">获取模型目录</button>
+              <span class="picker-hint" id="sub-model-hint">先填访问地址 + API Key，再拉取该站真实模型清单</span>
+            </div>
+            <div class="picker-list" id="sub-model-list" hidden></div>
+            <div class="picker-count" id="sub-model-count" hidden></div>
+          </div>
+        </div>
+        <div class="field">
+          <span>站点性质 *</span>
+          <div class="kind-pick" id="sub-kind-pick">
+            <label class="kind-item"><input type="radio" name="kind" value="public" checked /><b>公益中转站</b><em>免费 / 公开共享</em></label>
+            <label class="kind-item"><input type="radio" name="kind" value="commercial" /><b>商业中转站</b><em>充值 / 付费使用</em></label>
+          </div>
+        </div>
+        <label class="field"><span>备注 / 自评</span><input name="note" id="sub-note" maxlength="120" placeholder="稳定可靠 · 支持 Claude / GPT" /></label>
+      <label class="field"><span>联系方式（选填，仅审核可见）</span><input name="contact" id="sub-contact" maxlength="120" placeholder="邮箱 / TG" /></label>
+      <input type="text" id="sub-honey" tabindex="-1" autocomplete="off" style="position:absolute;left:-9999px" aria-hidden="true" />
+      <p class="form-error" id="sub-error" hidden></p>
+      <p class="form-note" id="sub-note-ok" hidden></p>
+    </div>
+
+    <footer class="modal-foot">
+      <button type="button" class="btn ghost" data-submit-close="1">取消</button>
+      <button type="submit" class="btn primary" id="sub-submit">提交审核</button>
+    </footer>
+  </form>
+</div>
+
+<div class="drawer" id="drawer" hidden>
+  <div class="drawer-mask" data-close="1"></div>
+  <aside class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+    <header class="drawer-head">
+      <div class="drawer-title-wrap">
+        <img id="drawer-logo" alt="" hidden />
+        <div>
+          <div class="drawer-name-row">
+            <h3 id="drawer-title">站点</h3>
+            <span id="drawer-kind" class="pub-flag lg" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1 1.1L12 21l7.8-7.5 1-1.1a5.5 5.5 0 0 0 0-7.8Z"></path></svg>公益中转站</span>
+          </div>
+          <a id="drawer-domain" href="#" target="_blank" rel="noreferrer"></a>
+        </div>
+      </div>
+      <button type="button" class="icon-btn" data-close="1" aria-label="关闭">✕</button>
+    </header>
+    <div class="drawer-body">
+      <div class="drawer-score">
+        <div><em id="drawer-score">0</em><span>综合评分</span></div>
+        <div><i class="grade grade-s" id="drawer-grade">S</i><span>等级</span></div>
+        <div><b id="drawer-rank">#—</b><span>榜单排名</span></div>
+      </div>
+      <div id="drawer-dims" class="dim-bars"></div>
+      <div class="drawer-probe-bar" id="drawer-probe-bar">
+        <span class="probe-clock" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3.5 2"></path></svg>
+        </span>
+        <div class="probe-copy">
+          <span>最近实测时间</span>
+          <strong id="drawer-probe">—</strong>
+        </div>
+        <em class="probe-source" id="drawer-probe-source">真实请求</em>
+      </div>
+      <div class="drawer-section-head"><span>站点信息</span><small>目录与访问数据</small></div>
+      <dl class="drawer-meta">
+        <div><dt>更新时间</dt><dd id="drawer-updated">—</dd></div>
+        <div><dt>支持模型</dt><dd id="drawer-models">0</dd></div>
+        <div><dt>访问量</dt><dd id="drawer-views">0</dd></div>
+        <div><dt>问题模型</dt><dd id="drawer-issues">0</dd></div>
+        <div><dt>不可用模型</dt><dd id="drawer-down">0</dd></div>
+      </dl>
+      <div class="drawer-section-head"><span>站点备注</span></div>
+      <p class="drawer-note" id="drawer-note"></p>
+      <a class="drawer-link" id="drawer-link" href="#" target="_blank" rel="noreferrer">访问站点 →</a>
+    </div>
+  </aside>
+</div>
+
+<script src="/app.js?v=55" defer></script>
+</body>
+</html>

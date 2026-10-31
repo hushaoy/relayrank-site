@@ -1,0 +1,14 @@
+{
+  "name": "relayrank-site",
+  "version": "2.0.0",
+  "private": true,
+  "description": "中转站测评榜单：零依赖 Node.js 站点 + 管理后台",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js && node --check login-guard.js && node --check probe.js && node --check eval-models.js && node --check security.js && node --check eval-sandbox.js && node --check secret-box.js && node --check public/app.js && node --check public/admin.js"
+  }
+}

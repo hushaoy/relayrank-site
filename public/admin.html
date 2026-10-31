@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>后台 · 中转站榜单管理</title>
+<meta name="robots" content="noindex, nofollow" />
+<link rel="icon" type="image/svg+xml" href="/uploads/favicon.svg" />
+<link rel="stylesheet" href="/admin.css?v=40" />
+<script src="/admin-boot.js"></script>
+</head>
+<body>
+
+<!-- 登录 -->
+<section class="login-wrap" id="login-view">
+  <form class="login-card" id="login-form" autocomplete="off" method="post" action="/login-form">
+    <div class="login-brand">
+      <span>RelayRank</span>
+    </div>
+    <h1>后台登录</h1>
+    <p class="login-sub">管理榜单站点、审核提交、批量导入</p>
+
+    <label class="field">
+      <span>用户名</span>
+      <input name="username" id="login-user" autocomplete="off" maxlength="64" required />
+    </label>
+    <label class="field">
+      <span>密码</span>
+      <input name="password" id="login-pass" type="password" autocomplete="new-password" maxlength="200" required />
+    </label>
+
+    <input type="hidden" name="next" value="/admin?full=1">
+    <p class="form-error" id="login-error" hidden></p>
+    <button class="btn primary block" type="submit" id="login-submit">登录</button>
+    <p class="login-hint">登录保护：同一账号 + IP 连续失败 5 次锁定 15 分钟；同一 IP 15 分钟内失败 20 次锁定 30 分钟。锁定记录在服务端持久化，重启不会清空。</p>
+    <p class="login-hint" id="diag">正在检测服务端…</p>
+    <p class="login-hint" id="boot-hint" hidden></p>
+    <a class="login-back" href="/">← 返回榜单</a>
+    <a class="login-back" href="/admin?plain=1">精简模式（无 JavaScript 也能用）</a>
+  </form>
+</section>
+
+<!-- 主界面 -->
+<div class="admin" id="admin-view" hidden>
+  <header class="admin-header">
+    <div class="admin-header-inner">
+      <a class="admin-brand" href="/" title="返回前台">
+        <span class="brand-logo" aria-hidden="true">R</span>
+        <span class="brand-text">
+          <b>RelayRank</b>
+          <small>管理后台</small>
+        </span>
+      </a>
+      <div class="admin-header-actions">
+        <a class="btn ghost" href="/" target="_blank" rel="noreferrer">查看前台 ↗</a>
+        <span class="header-sep" aria-hidden="true"></span>
+        <span class="who" id="who">admin</span>
+        <button class="btn ghost" id="logout-btn" type="button">退出</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="admin-main">
+    <section class="stat-row" id="stat-row">
+      <article class="stat-card"><span>全部站点</span><strong id="s-total">0</strong></article>
+      <article class="stat-card ok"><span>已通过</span><strong id="s-published">0</strong></article>
+      <article class="stat-card bad"><span>已驳回</span><strong id="s-rejected">0</strong></article>
+      <article class="stat-card pending"><span>待审核</span><strong id="s-pending">0</strong></article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div class="panel-title-wrap">
+          <h2 class="panel-title">站点管理</h2>
+          <div class="panel-tabs" id="status-tabs">
+            <button class="tab active" data-status="all">全部 <em id="t-all">0</em></button>
+            <button class="tab" data-status="published">已通过 <em id="t-published">0</em></button>
+            <button class="tab" data-status="rejected">已驳回 <em id="t-rejected">0</em></button>
+            <button class="tab" data-status="pending">待审核 <em id="t-pending">0</em></button>
+          </div>
+        </div>
+        <div class="panel-actions">
+          <input id="admin-search" class="input sm" placeholder="搜索名称 / 域名" />
+          <span class="list-count" id="list-count"></span>
+          <button class="btn primary" id="new-btn" type="button">＋ 新增站点</button>
+          <button class="btn ghost" id="import-btn" type="button">批量导入</button>
+          <button class="btn ghost" id="export-btn" type="button">导出 JSON</button>
+          <button class="btn ghost" data-bulk="probeAll" type="button" title="对全部已发布站点发真实请求，串行执行">全部实测</button>
+        </div>
+      </div>
+
+      <p class="admin-note">访客提交的站点默认进入「待审核」，管理员点「通过」后才会出现在前台榜单。</p>
+
+      <div class="bulk-bar" id="bulk-bar" hidden>
+        已选 <b id="bulk-count">0</b> 条
+        <button class="btn sm ok" data-bulk="approve" type="button">批量通过</button>
+        <button class="btn sm bad" data-bulk="reject" type="button">批量驳回</button>
+        <button class="btn sm ghost" data-bulk="clear" type="button">取消选择</button>
+      </div>
+
+      <div class="table-scroll">
+        <table class="admin-table">
+          <colgroup>
+            <col class="c-check" />
+            <col class="c-rank" />
+            <col class="c-site" />
+            <col class="c-score" />
+            <col class="c-grade" />
+            <col class="c-dims" />
+            <col class="c-mscore" />
+                <col class="c-views" />
+            <col class="c-status" />
+            <col class="c-time" />
+            <col class="c-ops" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th class="col-check"><input type="checkbox" id="check-all" aria-label="全选" /></th>
+              <th class="num sortable" data-sort="rank" title="与首页榜单同源：综合评分降序，同分看实测时间">名次</th>
+              <th class="sortable" data-sort="name">站点</th>
+              <th class="sortable num" data-sort="score">综合分</th>
+              <th class="num">等级</th>
+              <th class="col-dims" title="连通 / 目录 / 补全 / 流式 / 并发 成功率 (%)">五维成功率</th>
+                <th class="num" title="支持模型数 · 问题通道 · 故障通道">模型 · 问题 · 故障</th>
+              <th class="num sortable" data-sort="views" title="从榜单跳到该站点的真实次数，同一来源 6 小时内记 1 次">访问量</th>
+              <th class="sortable" data-sort="status">状态</th>
+              <th class="sortable" data-sort="probeAt" title="最近一次真实请求实测的时间；未实测显示「未实测」">实测时间</th>
+              <th class="col-ops">操作</th>
+            </tr>
+          </thead>
+          <tbody id="admin-body"><tr><td colspan="11" class="empty">加载中…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2 class="panel-title">审核日志 <small>最近 200 条 · 自动记录</small></h2>
+        <button class="btn ghost sm" id="refresh-reviews" type="button">刷新</button>
+      </div>
+      <ol class="log-list" id="log-list"><li class="empty">暂无记录</li></ol>
+    </section>
+
+    <section class="panel" id="auto-panel">
+      <div class="panel-head">
+        <h2 class="panel-title">自动实测 <small>定时对站点发真实请求，重算五维</small></h2>
+        <div class="panel-actions">
+          <span class="auto-status" id="auto-status">加载中…</span>
+          <button class="btn ghost sm" id="auto-run" type="button">立即执行</button>
+        </div>
+      </div>
+      <form class="auto-form" id="auto-form">
+        <label class="auto-switch">
+          <input type="checkbox" id="auto-enabled" />
+          <span>开启自动实测</span>
+        </label>
+        <label class="auto-switch" title="未配置 API Key 的站点无法完成补全/流式测试，强行实测会把分数打成 0">
+          <input type="checkbox" id="auto-key-only" checked />
+          <span>只测有 API Key 的站点</span>
+        </label>
+        <label class="field auto-field">
+          <span>间隔</span>
+          <select id="auto-interval">
+            <option value="5" selected>每 5 分钟</option>
+            <option value="15">每 15 分钟</option>
+            <option value="30">每 30 分钟</option>
+            <option value="60">每 1 小时</option>
+            <option value="120">每 2 小时</option>
+            <option value="360">每 6 小时</option>
+            <option value="720">每 12 小时</option>
+            <option value="1440">每 24 小时</option>
+          </select>
+        </label>
+        <label class="field auto-field">
+          <span>范围</span>
+          <select id="auto-scope">
+            <option value="published">只测已发布</option>
+            <option value="all">已发布 + 待审核</option>
+          </select>
+        </label>
+        <label class="auto-switch" title="访客提交后自动跑一次实测，五维达标就直接上线，不用人工点通过">
+          <input type="checkbox" id="review-enabled" checked />
+          <span>提交后自动审核</span>
+        </label>
+        <label class="field auto-field" title="综合分低于这个值就留在待审队列">
+          <span>综合分 ≥</span>
+          <input type="number" id="review-min-score" min="0" max="100" step="1" value="75" />
+        </label>
+        <label class="field auto-field" title="任一已测维度低于这个值就不自动通过">
+          <span>单维 ≥</span>
+          <input type="number" id="review-min-dim" min="0" max="100" step="1" value="60" />
+        </label>
+        <label class="field auto-field" title="没填 API Key 只能测连通，达不到最低维度数就转人工">
+          <span>至少测到</span>
+          <select id="review-min-dims">
+            <option value="1">1 维</option>
+            <option value="2">2 维</option>
+            <option value="3">3 维</option>
+            <option value="4">4 维</option>
+            <option value="5" selected>5 维</option>
+          </select>
+        </label>
+        <button class="btn primary sm" type="submit">保存设置</button>
+        <p class="auto-meta" id="auto-meta">—</p>
+      </form>
+    </section>
+
+    <section class="panel" id="guard-panel">
+      <div class="panel-head">
+        <h2 class="panel-title">登录防护 <small>失败锁定记录 · 可手动解锁</small></h2>
+        <div class="panel-actions">
+          <button class="btn ghost sm" id="guard-refresh" type="button">刷新</button>
+          <button class="btn ghost sm" id="guard-unlock-all" type="button">全部解锁</button>
+        </div>
+      </div>
+      <div class="guard-body" id="guard-body"><p class="empty">加载中…</p></div>
+    </section>
+
+    <section class="panel" id="security-panel">
+      <div class="panel-head"><h2 class="panel-title">账户安全 <small>定期更换登录密码</small></h2></div>
+      <form class="password-form" id="password-form">
+        <label class="field"><span>当前密码</span><input type="password" id="pw-current" autocomplete="current-password" required /></label>
+        <label class="field"><span>新密码（≥12 位）</span><input type="password" id="pw-next" autocomplete="new-password" required minlength="12" /></label>
+        <button class="btn primary" type="submit">更新密码</button>
+        <p class="form-note" id="pw-note" hidden></p>
+      </form>
+    </section>
+  </main>
+</div>
+
+<!-- 站点表单 -->
+<div class="modal" id="site-modal" hidden>
+  <div class="modal-mask" data-close="1"></div>
+  <form class="modal-card" id="site-form">
+    <header class="modal-head">
+      <h2 id="site-modal-title">新增站点</h2>
+      <button class="icon-btn" type="button" data-close="1" aria-label="关闭">✕</button>
+    </header>
+
+    <div class="modal-body">
+      <label class="field"><span>站点名称 *</span><input name="name" id="f-name" required maxlength="80" placeholder="例如：TinyGate" /></label>
+      <label class="field"><span>访问地址 *</span><input name="url" id="f-url" placeholder="https://example.com" required /></label>
+      <label class="field"><span>探测地址（可选，只用于测模型，与访问地址无关）</span><input id="f-evalbase" placeholder="https://api.example.com" maxlength="300" /></label>
+      <label class="field"><span>API Key（探测 / 评测用，留空不改）</span><input id="f-apikey" type="password" autocomplete="new-password" maxlength="200" placeholder="sk-…" /></label>
+      <label class="field"><span>批语 / 备注</span><input name="note" id="f-note" maxlength="120" placeholder="稳定可靠 · 模型支持全面" /></label>
+        <div class="field">
+          <span>站点性质</span>
+          <div class="kind-pick" id="f-kind-pick">
+            <label class="kind-item"><input type="radio" name="kind" value="commercial" checked /><b>商业中转站</b><em>充值 / 付费使用</em></label>
+            <label class="kind-item"><input type="radio" name="kind" value="public" /><b>公益中转站</b><em>免费 / 公开共享</em></label>
+          </div>
+        </div>
+
+      <div class="field">
+        <span>支持的模型（可多选）</span>
+        <div class="picker-bar">
+          <button type="button" class="btn ghost sm" id="f-fetch-models">获取模型目录</button>
+          <span class="picker-hint" id="f-model-hint">填上 API Key 后自动拉取该站真实模型</span>
+        </div>
+        <div class="chip-select" id="model-chips"></div>
+        <input type="hidden" name="tags" id="f-tags" />
+        <div class="chip-custom">
+          <input id="model-custom" placeholder="其它模型名，回车添加" maxlength="40" autocomplete="off" />
+          <span class="chip-count" id="model-count">已选 0 个</span>
+        </div>
+      </div>
+
+      <p class="dims-hint" id="probe-hint">保存后自动实测五维：连通 5 次（TTFB ≤3000ms）、目录 5 次（≤5000ms）、补全 8 次（≤10000ms）、流式 8 次（首个 token ≤10000ms）、3 路 + 5 路并发共 8 次（整轮 ≤30000ms）。超出时限算失败，一共 34 次请求，跑完约 60–120 秒。配了 API Key 才能测补全类，没配的显示「未测」。</p>
+
+      <p class="form-error" id="site-error" hidden></p>
+    </div>
+
+    <footer class="modal-foot">
+      <button class="btn ghost" type="button" data-close="1">取消</button>
+      <button class="btn primary" type="submit" id="site-submit">保存</button>
+    </footer>
+  </form>
+</div>
+
+<!-- 实测详情 -->
+<div class="modal" id="probe-modal" hidden>
+  <div class="modal-mask" data-close="1"></div>
+  <div class="modal-card wide">
+    <header class="modal-head">
+      <h2 id="probe-title">实测详情</h2>
+      <button class="icon-btn" type="button" data-close="1" aria-label="关闭">✕</button>
+    </header>
+    <div class="modal-body" id="probe-body"></div>
+    <footer class="modal-foot">
+      <button class="btn ghost" type="button" data-close="1">关闭</button>
+      <button class="btn primary" type="button" id="probe-rerun">再测一次</button>
+    </footer>
+  </div>
+</div>
+<div class="modal" id="eval-modal" hidden>
+  <div class="modal-mask" data-close="1"></div>
+  <div class="modal-card wide">
+    <header class="modal-head">
+      <h2 id="eval-title">模型评测报告</h2>
+      <button class="icon-btn" type="button" data-close="1" aria-label="关闭">✕</button>
+    </header>
+    <div class="modal-body" id="eval-body"><p class="empty">暂无数据</p></div>
+  </div>
+</div>
+
+<!-- 导入 -->
+<div class="modal" id="import-modal" hidden>
+  <div class="modal-mask" data-close="1"></div>
+  <form class="modal-card" id="import-form">
+    <header class="modal-head">
+      <h2>批量导入</h2>
+      <button class="icon-btn" type="button" data-close="1" aria-label="关闭">✕</button>
+    </header>
+    <div class="modal-body">
+      <div class="seg" id="import-format">
+        <button class="seg-btn active" type="button" data-format="json">JSON</button>
+        <button class="seg-btn" type="button" data-format="csv">CSV</button>
+      </div>
+      <p class="hint" id="import-hint">粘贴 JSON 数组，字段：name, domain, url, note, tags, models, issues, down, dims{reach, catalog, chat, stream, concurrent}（五维都是成功率 %）</p>
+      <textarea id="import-text" class="textarea" rows="12" spellcheck="false"></textarea>
+      <label class="check"><input type="checkbox" id="import-publish" /> 导入后直接发布（默认进入待审核）</label>
+      <p class="form-note" id="import-note" hidden></p>
+    </div>
+    <footer class="modal-foot">
+      <button class="btn ghost" type="button" data-close="1">取消</button>
+      <button class="btn primary" type="submit">开始导入</button>
+    </footer>
+  </form>
+</div>
+
+<!-- 驳回原因 -->
+<div class="modal" id="reject-modal" hidden>
+  <div class="modal-mask" data-close="1"></div>
+  <form class="modal-card narrow" id="reject-form">
+    <header class="modal-head">
+      <h2>驳回原因</h2>
+      <button class="icon-btn" type="button" data-close="1" aria-label="关闭">✕</button>
+    </header>
+    <div class="modal-body">
+      <p class="hint" id="reject-target"></p>
+      <label class="field"><span>原因（会记录到审核日志）</span>
+        <input id="reject-reason" maxlength="200" placeholder="例如：域名无法访问 / 分数与实测不符" required />
+      </label>
+    </div>
+    <footer class="modal-foot">
+      <button class="btn ghost" type="button" data-close="1">取消</button>
+      <button class="btn bad" type="submit">确认驳回</button>
+    </footer>
+  </form>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="/admin.js?v=50" defer></script>
+<script src="/admin-fallback.js" defer></script>
+</body>
+</html>

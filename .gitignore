@@ -1,0 +1,11 @@
+data/
+logs/
+dist/
+backup-*/
+node_modules/
+.env
+*.log
+public/uploads/*
+!public/uploads/seed/
+!public/uploads/seed/**
+!public/uploads/favicon.svg

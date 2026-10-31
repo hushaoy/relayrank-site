@@ -159,7 +159,6 @@ function valueOf(site, key) {
 /* 可排序键：取值器 + 默认方向。null 表示这一维没测，永远沉底 */
 const SORT_KEYS = {
   score: { get: (s) => s.score, desc: true, label: "综合评分" },
-  modelScore: { get: (s) => s.modelScore, desc: true, label: "模型分" },
   models: { get: (s) => s.models, desc: true, label: "支持模型数" },
   views: { get: (s) => s.views, desc: true, label: "访问量" },
   reach: { get: (s) => s.dims?.reach ?? null, desc: true, label: "连通成功率" },
@@ -310,14 +309,6 @@ const COLUMNS = [
     label: "综合评分",
     render: (s) =>
       `<td class="score-cell"><b>${fmt(s.score)}</b><i class="grade grade-${s.grade.toLowerCase()}" title="等级 ${s.grade}">${s.grade}</i></td>`
-  },
-  {
-    key: "modelScore",
-    label: "模型分",
-    render: (s) =>
-      s.modelScore === null || s.modelScore === undefined
-        ? `<td class="model-none" title="尚未做模型质量评测">—</td>`
-        : `<td class="model-score" title="${escapeHtml(s.modelEval ? s.modelEval.model + " · 能力 " + s.modelEval.ability.rate + "% · 上下文 " + s.modelEval.context.maxVerified + " tokens" : "")}">${Math.round(s.modelScore)}</td>`
   },
   { key: "dims", label: "五维评分", sortable: false, render: (s) => `<td class="dims-cell">${dimsMini(s)}</td>` },
   {

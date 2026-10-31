@@ -1,5 +1,8 @@
 # RelayRank · 大模型中转站测评榜单｜自助提交站点 · 自动实测审核 · 公开榜单推广
 
+> An open-source **benchmark and leaderboard for AI API relay / gateway stations** — five-dimension live probing, model quality evaluation, automatic review, and a public ranking board. Zero-dependency single-file Node.js server, no database required.
+
+
 给 AI API 中转站做体检：五维真实探测、模型质量评测、提交自动审核、可视化榜单。
 
 **你的中转站也可以上榜**：填个表提交站点地址和 API Key，系统自动排队实测，五维齐全、综合分达标就自动上线公开榜，不需要等人工审核、不需要付费推广。榜单页每个站点都带完整实测数据、访问地址和详情介绍。

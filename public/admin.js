@@ -182,7 +182,7 @@ function renderStats() {
   $("#s-published").textContent = s.published;
   $("#s-rejected").textContent = s.rejected;
   $("#t-pending").textContent = s.pending;
-  $("#t-all").textContent = s.total;
+  $("#t-all").textContent = s.published;
   $("#t-published").textContent = s.published;
   $("#t-rejected").textContent = s.rejected;
 }
@@ -210,7 +210,10 @@ function buildRanks(sites) {
 function visibleSites() {
   const q = state.query.trim().toLowerCase();
   const list = state.sites.filter((s) => {
-    if (state.status !== "all" && s.status !== state.status) return false;
+    // 「全部」只列已经上线的站点；待审核、已驳回各看各的
+    if (state.status === "all") {
+      if (s.status !== "published") return false;
+    } else if (s.status !== state.status) return false;
     if (q && !`${s.name} ${s.domain}`.toLowerCase().includes(q)) return false;
     return true;
   });
@@ -296,7 +299,7 @@ function renderTable() {
       : state.status === "pending"
         ? "没有待审核的站点，审核队列已清空。"
         : state.status === "all"
-          ? "还没有站点，点右上角「＋ 新增站点」开始。"
+          ? "还没有已通过的站点，去「待审核」里审一批上架。"
           : `这个分类下暂无站点。`;
     tbody.innerHTML = `<tr><td colspan="12" class="empty">${msg}</td></tr>`;
   } else {
@@ -432,8 +435,13 @@ function syncBulk() {
 function updateListCount() {
   const el = $("#list-count");
   if (!el) return;
+  // 「全部」口径已改成只含已通过，计数必须跟着走，否则会和表里的行数对不上
+  const scope =
+    state.status === "all"
+      ? state.sites.filter((s) => s.status === "published")
+      : state.sites.filter((s) => s.status === state.status);
   const shown = visibleSites().length;
-  const total = state.sites.length;
+  const total = scope.length;
   const q = state.query.trim();
   if (q) {
     el.textContent = `筛出 ${shown} / ${total}`;
@@ -475,7 +483,7 @@ function rowMenuItems(site) {
     { act: "sync-models", label: "同步模型目录", hint: hasKey ? "用已存 Key 重拉模型清单" : "先在编辑里填 API Key", disabled: !hasKey }
   ];
   if (site.status !== "published") items.push({ act: "approve", label: "通过", hint: "上线到前台榜单", sep: true, tone: "ok" });
-  if (site.status !== "rejected") items.push({ act: "reject", label: "驳回", hint: "打回并记录原因", sep: site.status === "published", tone: "bad" });
+  if (site.status !== "rejected") items.push({ act: "reject", label: "驳回并删除", hint: "记录驳回原因后从列表移除", sep: site.status === "published", tone: "bad" });
   if (site.status === "published" || site.status === "rejected") items.push({ act: "reset", label: "回待审", hint: "重新进入审核队列" });
   items.push({ act: "delete", label: "删除", hint: "不可撤销", sep: true, tone: "danger" });
   return items;
@@ -935,6 +943,28 @@ async function removeSite(site) {
   }
 }
 
+/* 驳回即删除：先写一条驳回记录留在审核流水里，再把站点从库里摘掉 */
+async function rejectAndRemove(ids, reason) {
+  let done = 0;
+  for (const id of ids) {
+    try {
+      await api(`/api/admin/sites/${id}/review`, { method: "POST", body: { action: "reject", reason } });
+    } catch (err) {
+      if (err.status === 401) return showLogin();
+    }
+    try {
+      await api(`/api/admin/sites/${id}`, { method: "DELETE" });
+      done += 1;
+    } catch (err) {
+      if (err.status === 401) return showLogin();
+    }
+  }
+  state.selected.clear();
+  toast(done ? `已驳回并删除 ${done} 条` : "驳回失败，站点仍保留", !done);
+  await loadSites();
+  await loadReviews();
+}
+
 /* ---------------- 表单 ---------------- */
 
 /* ---------------- 支持模型多选 ---------------- */
@@ -1173,7 +1203,7 @@ $("#reject-form").addEventListener("submit", async (e) => {
   const ids = state.rejectTargets;
   $("#reject-modal").hidden = true;
   state.bulkAction = "";
-  await review(ids, "reject", reason);
+  await rejectAndRemove(ids, reason);
 });
 
 /* ---------------- 批量导入 ---------------- */

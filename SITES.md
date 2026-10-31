@@ -1,7 +1,7 @@
 # 已通过审核的站点公示
 
 > 本页由 `scripts/export-sites.js` 自动生成，数据来自 RelayRank 榜单线上接口。
-> 生成时间：2026-10-31 13:43 UTC+8　|　在榜站点：4 个
+> 生成时间：2026-10-31 13:48 UTC+8　|　在榜站点：4 个
 > 
 > 只收录状态为 `published` 的站点。待审、驳回、草稿不会出现在这里。
 
@@ -9,7 +9,7 @@
 
 | 站点 | 地址 | 类型 | 综合分 | 等级 | 模型分 | 最近实测 |
 |:--|:--|:--:|--:|:--:|--:|:--|
-| [TinyGate](#tinygate) | [tinygate.top](https://tinygate.top) | 公益 | 53.1 | **D** | 81.2 | 2026-10-28 23:22 UTC+8 |
+| [TinyGate](#tinygate) | [tinygate.top](https://tinygate.top/v1) | 公益 | 100 | **S** | — | 2026-10-31 13:44 UTC+8 |
 | [niuniu](#niuniu) | [ces.ddddai.xyz](https://ces.ddddai.xyz/) | 公益 | 28.1 | **D** | 96 | 2026-10-28 23:20 UTC+8 |
 | [cige](#cige) | [kemeu.cn](https://kemeu.cn/) | 商业 | 25 | **D** | — | 2026-10-28 21:06 UTC+8 |
 | [AISA](#aisa) | [aisa.one](https://aisa.one) | 公益 | 10 | **D** | — | 2026-10-28 14:40 UTC+8 |
@@ -29,20 +29,20 @@ S ≥ 90   A ≥ 80   B ≥ 70   C ≥ 60   D < 60
 
 ### TinyGate
 
-**地址**：[https://tinygate.top](https://tinygate.top)
+**地址**：[https://tinygate.top/v1](https://tinygate.top/v1)
 
 | 项目 | 值 |
 |:--|:--|
 | 类型 | 公益 |
-| 综合分 | 53.1（D） |
-| 模型分 | 81.2（评测模型：deepseek-v4.1-flash） |
+| 综合分 | 100（S） |
+| 模型分 | — |
 | 在列模型数 | 11 |
-| 最近实测 | 2026-10-28 23:22 UTC+8 |
-| 标签 | kimi-k2 · deepseek-v3 · glm-4.5 |
+| 最近实测 | 2026-10-31 13:44 UTC+8 |
+| 标签 | TinyGate-Free · deepseek-v4-pro · deepseek-v4.1-flash · glm-5.2 · glm-5.3 · kimi-k2.6 · kimi-k2.7 · kimi-k2.8-preview · kimi-k3-1 · minimax-m3 · space-bunny |
 
 **简介**
 
-国产模型聚合 · 双协议
+TinyGate 目前的五维实测综合分为 100，等级 S。
 
 **五维实测**
 
@@ -50,24 +50,15 @@ S ≥ 90   A ≥ 80   B ≥ 70   C ≥ 60   D < 60
 |:--|--:|
 | 连通 | 100% |
 | 目录 | 100% |
-| 补全 | 75% |
-| 流式 | 0% |
-| 并发 | 37.5% |
-
-**模型评测**
-
-| 模型 | 模型分 | TTFT | tok/s | 通过 | 上下文 |
-|:--|--:|--:|--:|:--:|--:|
-| deepseek-v4.1-flash | 89.5 | 2495.3 ms | 128.6 | 19/19 | 32k |
-| TinyGate-Free | 72.8 | 2228.9 ms | 26.6 | 15/19 | 32k |
+| 补全 | 100% |
+| 流式 | 100% |
+| 并发 | 100% |
 
 **模型清单**
 
 `TinyGate-Free`、`deepseek-v4-pro`、`deepseek-v4.1-flash`、`glm-5.2`、`glm-5.3`、`kimi-k2.6`、`kimi-k2.7`、`kimi-k2.8-preview`、`kimi-k3-1`、`minimax-m3`，另有 1 个
 
-**降级检测**：强于预期 — 实测 5 档，高于 开源旗舰 的预期 4.2（1档 4/4 · 2档 4/4 · 3档 4/4 · 4档 4/4 · 5档 3/4）
-
-**线路数据**：TTFB 945.9 ms · TCP 91.6 ms · TLS 564.8 ms · TLSv1.2 · 证书剩余 47 天 · IP `207.57.121.154`
+**线路数据**：TTFB 710.4 ms · TCP 175.4 ms · TLS 533.5 ms · TLSv1.2 · 证书剩余 45 天 · IP `2001:df1:7880:100::1973`
 
 ---
 
